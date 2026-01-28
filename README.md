@@ -4,6 +4,7 @@ A Python web scraper that routes through Tor to access .onion sites and the dark
 
 
 ## Start Tor
+
     docker run --rm -p 127.0.0.1:9050:9050 -e SOCKS_HOSTNAME=0.0.0.0 leplusorg/tor
 
 ## Prerequisites
@@ -198,22 +199,3 @@ CookieAuthentication 1
 ```
 
 Then restart Tor: `sudo systemctl restart tor`
-
-## Differences from Original Scraper
-
-This Tor version includes several changes from the regular web scraper:
-
-1. **Proxy configuration**: All requests route through Tor's SOCKS proxy
-2. **Slower timing**: Increased delays and timeouts for Tor's slower network
-3. **Lower concurrency**: Reduced concurrent requests to avoid overloading .onion sites
-4. **No robots.txt**: Disabled since many .onion sites don't have accessible robots.txt
-5. **Enhanced retry logic**: More resilient to Tor's occasional connection issues
-
-## Support
-
-If you encounter issues:
-1. Check that Tor is running and accessible
-2. Verify the .onion address is correct and active
-3. Review the logs for specific error messages
-4. Try reducing `max_depth` and `CONCURRENT_REQUESTS`
-5. Test your Tor connection independently before running the scraper
