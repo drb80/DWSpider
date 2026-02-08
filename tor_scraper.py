@@ -104,8 +104,6 @@ class TorScraperMongo:
                 'html': html_content,  # Store complete HTML
                 'html_length': len(html_content),
                 'title': soup.title.string if soup.title else None,
-                'headings': [h.get_text(strip=True) for h in soup.find_all(['h1', 'h2', 'h3'])],
-                'paragraphs': [p.get_text(strip=True) for p in soup.find_all('p')][:10],
                 'meta_description': None,
                 'depth': depth,
                 'status_code': response.status_code,
@@ -142,7 +140,7 @@ class TorScraperMongo:
             
             # Follow links if not at max depth
             if depth < self.max_depth:
-                for link_url in links[:5]:  # Limit to 5 links per page
+                for link_url in links:
                     if link_url not in self.visited:
                         # Random delay to be polite
                         time.sleep(self.delay + random.uniform(0, 2))
@@ -281,7 +279,7 @@ if __name__ == '__main__':
     
     # Add your .onion URLs here
     start_urls = [
-        'http://yvudsnnux372gj2nvg3bnkficwf4niel6drfqyhbtglgdsf2l75xfqqd.onion/',
+        'https://ahmia.fyi/address/'
     ]
     
     try:

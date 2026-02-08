@@ -7,13 +7,14 @@ A Python web scraper that routes through Tor to access .onion sites and the dark
 
     docker run --rm -p 127.0.0.1:9050:9050 -e SOCKS_HOSTNAME=0.0.0.0 leplusorg/tor
 
-## Prerequisites
+Verify Tor is running
 
-1. **Tor must be running** on your system
-   - Default SOCKS proxy: `127.0.0.1:9050`
-   - Verify Tor is running: `curl --socks5-hostname 127.0.0.1:9050 https://check.torproject.org`
+    curl --socks5-hostname 127.0.0.1:9050 https://check.torproject.org
 
-2. **Python 3.7+** installed
+## Start Mongo
+
+    mkdir data
+    docker run -p 27017:27017 -v ${PWD}/data/db:/data/db mongo
 
 ## Installation
 
@@ -49,10 +50,10 @@ process.crawl(
 ### 4. Run the Scraper
 
 ```bash
-python tor_scraper.py
+python3 tor_scraper.py
 ```
 
-Output will be saved to `tor_output.json`.
+Output will be written to Mongo.
 
 ## How It Works
 
@@ -121,21 +122,6 @@ The scraper includes Tor-specific optimizations:
 - Try accessing the site manually through Tor Browser first to verify it works
 
 ## Output Format
-
-Results are saved to `tor_output.json`:
-
-```json
-[
-  {
-    "url": "http://example.onion/page",
-    "title": "Page Title",
-    "headings": ["Heading 1", "Heading 2"],
-    "paragraphs": ["Paragraph text..."],
-    "links": ["http://example.onion/link1", "..."],
-    "depth": 0
-  }
-]
-```
 
 ## Legal and Ethical Considerations
 
