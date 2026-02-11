@@ -307,6 +307,34 @@ class ThreadedTorScraperMongo:
         logging.info("\n✓ MongoDB connection closed")
 
 
+def load_urls_from_file(filename):
+    """
+    Load URLs from a text file (one URL per line)
+    
+    Args:
+        filename: Path to file containing URLs
+    
+    Returns:
+        List of URLs
+    """
+    urls = []
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Strip whitespace and skip empty lines and comments
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    urls.append(line)
+        logging.info(f"✓ Loaded {len(urls)} URLs from {filename}")
+        return urls
+    except FileNotFoundError:
+        logging.error(f"✗ File not found: {filename}")
+        return []
+    except Exception as e:
+        logging.error(f"✗ Error reading file {filename}: {e}")
+        return []
+
+
 def test_tor_connection():
     """Test if Tor is working"""
     logging.info("Testing Tor connection...")
@@ -349,6 +377,24 @@ if __name__ == '__main__':
     COLLECTION_NAME = 'pages'
     NUM_THREADS = 3  # Number of concurrent threads (one per domain)
     
+    # URL source - choose one method:
+    
+    # METHOD 1: Load URLs from file
+    URLS_FILE = 'urls.txt'  # One URL per line
+    start_urls = load_urls_from_file(URLS_FILE)
+    
+    # METHOD 2: Manual list (comment out METHOD 1 if using this)
+    # start_urls = [
+    #     'http://yvudsnnux372gj2nvg3bnkficwf4niel6drfqyhbtglgdsf2l75xfqqd.onion/',
+    #     'http://another-onion-site.onion/',
+    #     'http://yet-another-site.onion/',
+    # ]
+    
+    # Exit if no URLs loaded
+    if not start_urls:
+        logging.error("No URLs to scrape. Please check your urls.txt file or use manual list.")
+        exit(1)
+    
     # Test connections first
     if not test_tor_connection():
         print("Please make sure Tor is running on port 9050")
@@ -369,14 +415,6 @@ if __name__ == '__main__':
         delay=3,          # 3 second delay between requests
         num_threads=NUM_THREADS  # Number of concurrent domain threads
     )
-    
-    # Add your .onion URLs here - each will be scraped in its own thread
-    start_urls = [
-        'http://yvudsnnux372gj2nvg3bnkficwf4niel6drfqyhbtglgdsf2l75xfqqd.onion/',
-        # Add more .onion URLs here - each gets its own thread
-        # 'http://another-onion-site.onion/',
-        # 'http://yet-another-site.onion/',
-    ]
     
     try:
         # Scrape
