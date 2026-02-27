@@ -27,7 +27,8 @@ class TorScraperMongo:
                  db_name='tor_scraper',
                  collection_name='pages',
                  max_depth=5,
-                 delay=3):
+                 delay=3,
+                 verify_ssl=True):
         """
         Initialise the scraper with a MongoDB connection.
 
@@ -37,6 +38,8 @@ class TorScraperMongo:
             collection_name: collection for pages
             max_depth: crawl depth limit
             delay: delay between requests
+            verify_ssl: whether to verify HTTPS certificates (set to False to
+                permit self-signed certificates)
         """
         try:
             self.client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
@@ -45,6 +48,8 @@ class TorScraperMongo:
         except ConnectionFailure as e:
             logging.error(f"Failed to connect to MongoDB: {e}")
             raise
+        
+        self.verify_ssl = verify_ssl
 
         self.db = self.client[db_name]
         self.collection = self.db[collection_name]
@@ -62,7 +67,12 @@ class TorScraperMongo:
         self.thread_name = 'main'
 
     def get_session(self):
-        """Return a requests session configured to use the local Tor proxy."""
+        """Return a requests session configured to use the local Tor proxy.
+
+        The returned session honours :attr:`verify_ssl`; if that flag is False
+        the session will not validate HTTPS certificates (useful for testing
+        against servers with self-signed certs).
+        """
         session = requests.Session()
         session.proxies = {
             'http': 'socks5h://127.0.0.1:9050',
@@ -72,6 +82,8 @@ class TorScraperMongo:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:109.0) '
                           'Gecko/20100101 Firefox/115.0'
         })
+        # control certificate validation
+        session.verify = self.verify_ssl
         return session
 
     def is_onion_url(self, url):
@@ -80,7 +92,13 @@ class TorScraperMongo:
         return parsed.netloc.endswith('.onion')
 
     def is_valid_url(self, url):
-        """Return True if the URL is http/https, not an image, not fragment-only, and is an onion site."""
+        """Return True if the URL is http/https, not an image or other binary file,
+        not fragment-only, and is an onion site.
+
+        We also exclude a handful of common download extensions such as DMG and MSI
+        so that the scraper stays focussed on HTML pages. The response content-type
+        is checked later in ``scrape_page`` to avoid saving non-HTML responses.
+        """
         if not url:
             return False
 
@@ -88,9 +106,14 @@ class TorScraperMongo:
         if url.startswith('#'):
             return False
 
-        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp',
-                            '.svg', '.webp', '.ico']
-        if any(url.lower().endswith(ext) for ext in image_extensions):
+        # extensions that are clearly not HTML pages
+        non_html_exts = [
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp',
+            '.svg', '.webp', '.ico',
+            '.dmg', '.msi', '.exe', '.zip', '.tar', '.gz',
+            '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'
+        ]
+        if any(url.lower().endswith(ext) for ext in non_html_exts):
             return False
 
         parsed = urlparse(url)
@@ -135,6 +158,13 @@ class TorScraperMongo:
         try:
             response = session.get(url, timeout=60)
             response.raise_for_status()
+
+            # only process HTML responses; skip binary downloads
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/html' not in content_type:
+                logging.info(f"Skipping non-HTML content ({content_type}) at {url}")
+                return
+
             html_content = response.text
             soup = BeautifulSoup(html_content, 'html.parser')
 
@@ -362,7 +392,7 @@ if __name__ == '__main__':
         db_name=DB_NAME,
         collection_name=COLLECTION_NAME,
         max_depth=5,      # keep it shallow for testing
-        delay=0            # 0–3 second delay between requests
+        delay=0,            # 0–3 second delay between requests
     )
 
     try:
