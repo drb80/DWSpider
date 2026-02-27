@@ -74,9 +74,18 @@ class TorScraperMongo:
         })
         return session
 
+    def is_onion_url(self, url):
+        """Check if URL is an onion site (.onion domain)."""
+        parsed = urlparse(url)
+        return parsed.netloc.endswith('.onion')
+
     def is_valid_url(self, url):
-        """Return True if the URL is http/https and not an image."""
+        """Return True if the URL is http/https, not an image, not fragment-only, and is an onion site."""
         if not url:
+            return False
+
+        # Filter out fragment-only URLs (e.g., #section, #top)
+        if url.startswith('#'):
             return False
 
         image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp',
@@ -85,7 +94,17 @@ class TorScraperMongo:
             return False
 
         parsed = urlparse(url)
-        return parsed.scheme in ['http', 'https']
+        if parsed.scheme not in ['http', 'https']:
+            return False
+        
+        # Only allow .onion sites
+        return self.is_onion_url(url)
+    
+    def normalize_url(self, url):
+        """Remove fragments from URLs to avoid duplicates like url/ and url/#main."""
+        parsed = urlparse(url)
+        # Reconstruct URL without fragment
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}{'?' + parsed.query if parsed.query else ''}"
 
     def mark_visited(self, url):
         """Record that we have visited a URL.
@@ -143,10 +162,15 @@ class TorScraperMongo:
                 page_data['meta_description'] = meta_desc['content']
 
             links = []
+            seen_normalized = set()
             for link in soup.find_all('a', href=True):
                 absolute_url = urljoin(url, link['href'])
                 if self.is_valid_url(absolute_url):
-                    links.append(absolute_url)
+                    # Normalize to avoid duplicates with different fragments
+                    normalized = self.normalize_url(absolute_url)
+                    if normalized not in seen_normalized:
+                        links.append(absolute_url)
+                        seen_normalized.add(normalized)
 
             page_data['links'] = links
             page_data['links_count'] = len(links)
@@ -163,7 +187,8 @@ class TorScraperMongo:
                 return
 
             if depth < self.max_depth:
-                for link_url in links[:5]:
+                # Follow all discovered links
+                for link_url in links:
                     time.sleep(self.delay + random.uniform(0, 2))
                     self.scrape_page(link_url, depth + 1,
                                      parent_url=url, session=session)
@@ -233,22 +258,30 @@ class TorScraperMongo:
 
 def load_urls_from_file(filename):
     """
-    Load URLs from a text file (one URL per line)
+    Load URLs from a text file (one URL per line).
+    Only loads .onion (Tor) URLs.
 
     Args:
         filename: Path to file containing URLs
 
     Returns:
-        List of URLs
+        List of onion URLs
     """
     urls = []
+    skipped = 0
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#'):
-                    urls.append(line)
-        logging.info(f"✓ Loaded {len(urls)} URLs from {filename}")
+                    # Only include .onion URLs
+                    if '.onion' in line:
+                        urls.append(line)
+                    else:
+                        skipped += 1
+        logging.info(f"✓ Loaded {len(urls)} onion URLs from {filename}")
+        if skipped > 0:
+            logging.info(f"  (Skipped {skipped} non-onion URLs)")
         return urls
     except FileNotFoundError:
         logging.error(f"✗ File not found: {filename}")
