@@ -13,11 +13,13 @@ from datetime import datetime
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Set up logging – no threading any more so we don't print thread names.
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s',
     datefmt='%H:%M:%S'
 )
 
@@ -28,6 +30,7 @@ class TorScraperMongo:
                  collection_name='pages',
                  max_depth=5,
                  delay=3,
+                 max_workers=4,
                  verify_ssl=True):
         """
         Initialise the scraper with a MongoDB connection.
@@ -38,6 +41,7 @@ class TorScraperMongo:
             collection_name: collection for pages
             max_depth: crawl depth limit
             delay: delay between requests
+            max_workers: number of threads to use for scraping
             verify_ssl: whether to verify HTTPS certificates (set to False to
                 permit self-signed certificates)
         """
@@ -58,13 +62,25 @@ class TorScraperMongo:
 
         self.max_depth = max_depth
         self.delay = delay
+        self.max_workers = max_workers
 
-        # simple, non‑threaded state
+        # simple, threaded state
         self.visited = set()
         self.pages_saved = 0
+        self.pending_tasks = 0
+        self.lock = threading.Lock()
 
-        # constant value stored in each document
-        self.thread_name = 'main'
+    def _increment_pending(self, amount: int = 1):
+        with self.lock:
+            self.pending_tasks += amount
+
+    def _decrement_pending(self, amount: int = 1):
+        with self.lock:
+            self.pending_tasks = max(0, self.pending_tasks - amount)
+
+    def get_pending_count(self):
+        with self.lock:
+            return self.pending_tasks
 
     def get_session(self):
         """Return a requests session configured to use the local Tor proxy.
@@ -134,15 +150,17 @@ class TorScraperMongo:
 
         Returns False if it was already seen.
         """
-        if url in self.visited:
-            return False
-        self.visited.add(url)
-        return True
+        with self.lock:
+            if url in self.visited:
+                return False
+            self.visited.add(url)
+            return True
 
     def increment_pages_saved(self):
-        self.pages_saved += 1
+        with self.lock:
+            self.pages_saved += 1
 
-    def scrape_page(self, url, depth=0, parent_url=None, session=None):
+    def scrape_page(self, url, depth=0, parent_url=None, session=None, executor=None):
         """Scrape a single page and save to MongoDB."""
         if depth > self.max_depth:
             return
@@ -151,8 +169,14 @@ class TorScraperMongo:
             logging.debug(f"Already visited: {url}")
             return
 
+        # Respect a per-request delay to avoid hammering Tor endpoints
+        if self.delay and depth > 0:
+            time.sleep(self.delay + random.uniform(0, 2))
+
         if session is None:
             session = self.get_session()
+
+        thread_name = threading.current_thread().name
 
         logging.info(f"[Depth {depth}] Scraping: {url}")
         try:
@@ -184,7 +208,7 @@ class TorScraperMongo:
                 'scraped_at': datetime.utcnow(),
                 'content_type': response.headers.get('Content-Type',
                                                     'unknown'),
-                'thread_name': self.thread_name,
+                'thread_name': thread_name,
             }
 
             meta_desc = soup.find('meta', attrs={'name': 'description'})
@@ -216,12 +240,24 @@ class TorScraperMongo:
                 logging.warning(f"Already in database: {url}")
                 return
 
-            if depth < self.max_depth:
+            if depth < self.max_depth and links:
                 # Follow all discovered links
                 for link_url in links:
-                    time.sleep(self.delay + random.uniform(0, 2))
-                    self.scrape_page(link_url, depth + 1,
-                                     parent_url=url, session=session)
+                    if executor:
+                        # Each task can create its own session, keeping requests usage thread-safe
+                        future = executor.submit(self.scrape_page,
+                                                 link_url,
+                                                 depth + 1,
+                                                 url,
+                                                 None,
+                                                 executor)
+                        self._increment_pending()
+                        future.add_done_callback(lambda f: self._decrement_pending())
+                        logging.debug(f"Queued: {link_url} (pending: {self.get_pending_count()})")
+                    else:
+                        self.scrape_page(link_url, depth + 1,
+                                         parent_url=url, session=session,
+                                         executor=None)
 
         except requests.exceptions.Timeout:
             logging.error(f"Timeout on {url}")
@@ -231,18 +267,29 @@ class TorScraperMongo:
             logging.error(f"Unexpected error on {url}: {e}")
 
     def scrape(self, start_urls):
-        """Sequentially scrape each start URL."""
+        """Scrape each start URL using a thread pool."""
         logging.info("\nStarting Tor scraper with MongoDB storage...")
         logging.info(f"Max depth: {self.max_depth}")
         logging.info(f"Delay: {self.delay}s")
+        logging.info(f"Thread pool size: {self.max_workers}")
         logging.info(f"Domains to scrape: {len(start_urls)}")
         logging.info("-" * 60)
 
-        session = self.get_session()
-        for url in start_urls:
-            logging.info(f"Starting domain: {url}")
-            self.scrape_page(url, depth=0, session=session)
-            logging.info(f"Completed domain: {url}")
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_url = {}
+            for url in start_urls:
+                future = executor.submit(self.scrape_page, url, 0, None, None, executor)
+                self._increment_pending()
+                future.add_done_callback(lambda f: self._decrement_pending())
+                future_to_url[future] = url
+
+            for future in as_completed(future_to_url):
+                url = future_to_url[future]
+                try:
+                    future.result()
+                    logging.info(f"Completed domain: {url} (queue: {self.get_pending_count()} pending)")
+                except Exception as e:
+                    logging.error(f"Error scraping {url}: {e}")
 
         logging.info("=" * 60)
         logging.info("Scraping complete!")
