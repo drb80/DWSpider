@@ -9,12 +9,12 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import time
 import random
-from datetime import datetime
+from datetime import datetime, UTC
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 # Set up logging – no threading any more so we don't print thread names.
 logging.basicConfig(
@@ -77,6 +77,34 @@ class TorScraperMongo:
     def _decrement_pending(self, amount: int = 1):
         with self.lock:
             self.pending_tasks = max(0, self.pending_tasks - amount)
+
+    def _on_task_done(self, future):
+        """Handle task completion and keep pending counter balanced."""
+        try:
+            # Surface unexpected task failures in logs.
+            future.result()
+        except Exception as e:
+            logging.error(f"Task failed: {e}")
+        finally:
+            self._decrement_pending()
+
+    def _submit_task(self, executor, url, depth, parent_url):
+        """Submit a scrape task in a race-safe way for pending tracking."""
+        self._increment_pending()
+        try:
+            future = executor.submit(self.scrape_page,
+                                     url,
+                                     depth,
+                                     parent_url,
+                                     None,
+                                     executor)
+        except Exception:
+            # Keep counter correct if submission itself fails.
+            self._decrement_pending()
+            raise
+
+        future.add_done_callback(self._on_task_done)
+        return future
 
     def get_pending_count(self):
         with self.lock:
@@ -205,7 +233,7 @@ class TorScraperMongo:
                 'meta_description': None,
                 'depth': depth,
                 'status_code': response.status_code,
-                'scraped_at': datetime.utcnow(),
+                'scraped_at': datetime.now(UTC),
                 'content_type': response.headers.get('Content-Type',
                                                     'unknown'),
                 'thread_name': thread_name,
@@ -244,16 +272,19 @@ class TorScraperMongo:
                 # Follow all discovered links
                 for link_url in links:
                     if executor:
-                        # Each task can create its own session, keeping requests usage thread-safe
-                        future = executor.submit(self.scrape_page,
-                                                 link_url,
-                                                 depth + 1,
-                                                 url,
-                                                 None,
-                                                 executor)
-                        self._increment_pending()
-                        future.add_done_callback(lambda f: self._decrement_pending())
-                        logging.debug(f"Queued: {link_url} (pending: {self.get_pending_count()})")
+                        # Each task creates its own session to keep requests usage thread-safe.
+                        try:
+                            self._submit_task(executor, link_url, depth + 1, url)
+                            logging.debug(f"Queued: {link_url} (pending: {self.get_pending_count()})")
+                        except RuntimeError as e:
+                            # If executor is shutting down, fall back to local recursion.
+                            if 'cannot schedule new futures after shutdown' in str(e):
+                                logging.warning(f"Executor shutting down; scraping inline: {link_url}")
+                                self.scrape_page(link_url, depth + 1,
+                                                 parent_url=url, session=session,
+                                                 executor=None)
+                            else:
+                                raise
                     else:
                         self.scrape_page(link_url, depth + 1,
                                          parent_url=url, session=session,
@@ -275,21 +306,19 @@ class TorScraperMongo:
         logging.info(f"Domains to scrape: {len(start_urls)}")
         logging.info("-" * 60)
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_url = {}
-            for url in start_urls:
-                future = executor.submit(self.scrape_page, url, 0, None, None, executor)
-                self._increment_pending()
-                future.add_done_callback(lambda f: self._decrement_pending())
-                future_to_url[future] = url
+        with self.lock:
+            self.pending_tasks = 0
 
-            for future in as_completed(future_to_url):
-                url = future_to_url[future]
-                try:
-                    future.result()
-                    logging.info(f"Completed domain: {url} (queue: {self.get_pending_count()} pending)")
-                except Exception as e:
-                    logging.error(f"Error scraping {url}: {e}")
+        executor = ThreadPoolExecutor(max_workers=self.max_workers)
+        try:
+            for url in start_urls:
+                self._submit_task(executor, url, 0, None)
+
+            # Keep the executor alive until all recursively queued tasks finish.
+            while self.get_pending_count() > 0:
+                time.sleep(0.1)
+        finally:
+            executor.shutdown(wait=True)
 
         logging.info("=" * 60)
         logging.info("Scraping complete!")
