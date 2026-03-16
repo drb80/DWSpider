@@ -28,9 +28,9 @@ class TorScraperMongo:
     def __init__(self, mongo_uri='mongodb://localhost:27017/',
                  db_name='tor_scraper',
                  collection_name='pages',
-                 max_depth=5,
+                 max_depth=25,
                  delay=3,
-                 max_workers=4,
+                 max_workers=10,
                  verify_ssl=True):
         """
         Initialise the scraper with a MongoDB connection.
