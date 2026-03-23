@@ -4,8 +4,10 @@ from seed_harvester import (
     build_paginated_urls,
     canonicalize_onion_url,
     expand_web_sources,
+    extract_onion_urls_from_anchors,
     extract_onion_urls_from_html,
     extract_onion_urls_from_text,
+    SeedHarvester,
     is_ahmia_source,
     merge_into_catalog,
 )
@@ -76,6 +78,14 @@ class TestSeedHarvesterHelpers(unittest.TestCase):
         self.assertIn(f"http://{host1}/", from_html)
         self.assertIn(f"http://{host2}/", from_html)
 
+    def test_extract_from_anchors_only(self):
+        host_anchor = "e" * 56 + ".onion"
+        host_text = "f" * 56 + ".onion"
+        html = f'<html><body><a href="http://{host_anchor}/a">a</a>{host_text}</body></html>'
+        from_anchors = extract_onion_urls_from_anchors("https://source.test", html)
+        self.assertIn(f"http://{host_anchor}/", from_anchors)
+        self.assertNotIn(f"http://{host_text}/", from_anchors)
+
     def test_merge_into_catalog_tracks_new_and_existing(self):
         host = "d" * 56 + ".onion"
         url = f"http://{host}/"
@@ -91,6 +101,24 @@ class TestSeedHarvesterHelpers(unittest.TestCase):
         self.assertEqual(stats2.new_hosts, 0)
         self.assertEqual(stats2.existing_hosts, 1)
         self.assertEqual(catalog["hosts"][host]["seen_count"], 2)
+
+
+class TestSeedHarvesterWebMode(unittest.TestCase):
+    def test_ahmia_uses_anchor_only_extraction(self):
+        host_anchor = "g" * 56 + ".onion"
+        host_text = "h" * 56 + ".onion"
+        html = f'<html><body><a href="http://{host_anchor}/x">x</a>{host_text}</body></html>'
+
+        harvester = SeedHarvester(
+            mongo_uri="mongodb://localhost:27017/",
+            db_name="tor_scraper",
+            collection_name="pages",
+        )
+        harvester.fetch_text = lambda _url: html
+
+        gathered = harvester.harvest_from_web(["https://ahmia.fi/address/?page=1"])
+        self.assertIn(f"http://{host_anchor}/", gathered)
+        self.assertNotIn(f"http://{host_text}/", gathered)
 
 
 if __name__ == "__main__":

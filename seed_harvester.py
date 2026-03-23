@@ -94,6 +94,13 @@ def extract_onion_urls_from_text(text: str) -> set[str]:
 def extract_onion_urls_from_html(page_url: str, html_text: str) -> set[str]:
     """Extract onion URLs from both links and raw text in HTML."""
     found = set(extract_onion_urls_from_text(html_text))
+    found.update(extract_onion_urls_from_anchors(page_url, html_text))
+    return found
+
+
+def extract_onion_urls_from_anchors(page_url: str, html_text: str) -> set[str]:
+    """Extract onion URLs from anchor href values only."""
+    found: set[str] = set()
     soup = BeautifulSoup(html_text, "html.parser")
 
     for anchor in soup.find_all("a", href=True):
@@ -101,7 +108,6 @@ def extract_onion_urls_from_html(page_url: str, html_text: str) -> set[str]:
         normalized = canonicalize_onion_url(absolute)
         if normalized:
             found.add(normalized)
-
     return found
 
 
@@ -204,7 +210,12 @@ class SeedHarvester:
 
             try:
                 html = self.fetch_text(source)
-                urls = extract_onion_urls_from_html(source, html)
+                # Ahmia pages can include repeated embedded onion blobs in raw text.
+                # Use anchors-only there so pagination reflects page-level results.
+                if is_ahmia_source(source):
+                    urls = extract_onion_urls_from_anchors(source, html)
+                else:
+                    urls = extract_onion_urls_from_html(source, html)
                 logging.info("Web source %s yielded %d onion hosts", source, len(urls))
                 for url in urls:
                     gathered.setdefault(url, set()).add(f"web:{source}")
