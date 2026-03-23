@@ -9,8 +9,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import time
 import random
+from datetime import datetime, timezone
 import re
-from datetime import datetime, UTC
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
 import logging
@@ -33,12 +33,10 @@ class TorScraperMongo:
     def __init__(self, mongo_uri='mongodb://localhost:27017/',
                  db_name='tor_scraper',
                  collection_name='pages',
-                 max_depth=5,
+                 max_depth=25,
                  delay=3,
-                 max_workers=4,
-                 verify_ssl=True,
-                 request_timeout=60,
-                 max_retries=2):
+                 max_workers=10,
+                 verify_ssl=True):
         """
         Initialise the scraper with a MongoDB connection.
 
@@ -313,7 +311,7 @@ class TorScraperMongo:
                 'meta_description': None,
                 'depth': depth,
                 'status_code': response.status_code,
-                'scraped_at': datetime.now(UTC),
+                'scraped_at': datetime.now(timezone.utc),
                 'content_type': response.headers.get('Content-Type',
                                                     'unknown'),
                 'thread_name': thread_name,
@@ -544,7 +542,7 @@ if __name__ == '__main__':
         mongo_uri=MONGO_URI,
         db_name=DB_NAME,
         collection_name=COLLECTION_NAME,
-        max_depth=5,      # keep it shallow for testing
+        max_depth=100,      # keep it shallow for testing
         delay=0,            # 0–3 second delay between requests
     )
 
