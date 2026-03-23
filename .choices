@@ -1,4 +1,7 @@
-python3 seed_harvester.py --ahmia-max-pages 25 --ahmia-start-page 1 --from-mongo --mongo-doc-limit 50000
-
+docker run -it -p 27017:27017 -v ${PWD}/data/db:/data/db mongo
+----
 python3 seed_harvester.py --ahmia-max-pages 200 --ahmia-start-page 1 --from-mongo --mongo-doc-limit 300000 --log-level INFO
+----
 python3 tor_scraper.py
+----
+~/mongobin/mongodump --db tor_scraper --out /tmp/data
