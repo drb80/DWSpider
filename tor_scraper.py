@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import time
 import random
+import re
 from datetime import datetime, UTC
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
@@ -25,13 +26,19 @@ logging.basicConfig(
 
 
 class TorScraperMongo:
+    ONION_CANDIDATE_RE = re.compile(
+        r'(?i)(?:https?://)?([a-z2-7]{16}|[a-z2-7]{56})\.onion(?:/[^\s"\'<>)]*)?'
+    )
+
     def __init__(self, mongo_uri='mongodb://localhost:27017/',
                  db_name='tor_scraper',
                  collection_name='pages',
                  max_depth=5,
                  delay=3,
                  max_workers=4,
-                 verify_ssl=True):
+                 verify_ssl=True,
+                 request_timeout=60,
+                 max_retries=2):
         """
         Initialise the scraper with a MongoDB connection.
 
@@ -44,6 +51,8 @@ class TorScraperMongo:
             max_workers: number of threads to use for scraping
             verify_ssl: whether to verify HTTPS certificates (set to False to
                 permit self-signed certificates)
+            request_timeout: request timeout in seconds
+            max_retries: retries for timeouts / transient request failures
         """
         try:
             self.client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
@@ -63,6 +72,8 @@ class TorScraperMongo:
         self.max_depth = max_depth
         self.delay = delay
         self.max_workers = max_workers
+        self.request_timeout = request_timeout
+        self.max_retries = max_retries
 
         # simple, threaded state
         self.visited = set()
@@ -170,8 +181,77 @@ class TorScraperMongo:
     def normalize_url(self, url):
         """Remove fragments from URLs to avoid duplicates like url/ and url/#main."""
         parsed = urlparse(url)
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc.lower()
+        # Remove default ports to reduce duplicates.
+        if (scheme == 'http' and netloc.endswith(':80')) or (
+            scheme == 'https' and netloc.endswith(':443')
+        ):
+            netloc = netloc.rsplit(':', 1)[0]
         # Reconstruct URL without fragment
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}{'?' + parsed.query if parsed.query else ''}"
+        return f"{scheme}://{netloc}{parsed.path}{'?' + parsed.query if parsed.query else ''}"
+
+    def extract_onion_links(self, page_url, html_content, soup):
+        """Extract onion links from anchors and raw HTML text.
+
+        Some onion pages hide links in script/text blobs rather than anchor tags,
+        so we also scan raw HTML for onion URL patterns.
+        """
+        links = []
+        seen_normalized = set()
+
+        for link in soup.find_all('a', href=True):
+            absolute_url = urljoin(page_url, link['href'])
+            if self.is_valid_url(absolute_url):
+                normalized = self.normalize_url(absolute_url)
+                if normalized not in seen_normalized:
+                    links.append(normalized)
+                    seen_normalized.add(normalized)
+
+        for match in self.ONION_CANDIDATE_RE.finditer(html_content):
+            candidate = match.group(0)
+            if not candidate.lower().startswith(('http://', 'https://')):
+                candidate = f"http://{candidate}"
+            absolute_url = urljoin(page_url, candidate)
+            if self.is_valid_url(absolute_url):
+                normalized = self.normalize_url(absolute_url)
+                if normalized not in seen_normalized:
+                    links.append(normalized)
+                    seen_normalized.add(normalized)
+
+        return links
+
+    def fetch_with_retries(self, session, url):
+        """Fetch a URL with retry/backoff for transient Tor failures."""
+        last_error = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = session.get(url, timeout=self.request_timeout)
+                response.raise_for_status()
+                return response
+            except requests.exceptions.Timeout as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    backoff = 1.5 ** attempt + random.uniform(0, 1)
+                    logging.debug(f"Timeout on {url}; retrying in {backoff:.1f}s")
+                    time.sleep(backoff)
+                    continue
+                raise
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                # Retry select transient network conditions.
+                retriable = any(marker in str(e).lower() for marker in [
+                    'connection reset', 'temporarily unavailable',
+                    'connection aborted', 'remote end closed connection'
+                ])
+                if retriable and attempt < self.max_retries:
+                    backoff = 1.5 ** attempt + random.uniform(0, 1)
+                    logging.debug(f"Transient error on {url}; retrying in {backoff:.1f}s")
+                    time.sleep(backoff)
+                    continue
+                raise
+        if last_error:
+            raise last_error
 
     def mark_visited(self, url):
         """Record that we have visited a URL.
@@ -208,16 +288,16 @@ class TorScraperMongo:
 
         logging.info(f"[Depth {depth}] Scraping: {url}")
         try:
-            response = session.get(url, timeout=60)
-            response.raise_for_status()
+            response = self.fetch_with_retries(session, url)
 
-            # only process HTML responses; skip binary downloads
+            # Process HTML and also content with missing/incorrect content-type.
             content_type = response.headers.get('Content-Type', '')
-            if 'text/html' not in content_type:
+            html_content = response.text
+            looks_like_html = '<html' in html_content[:4096].lower()
+            if 'text/html' not in content_type.lower() and not looks_like_html:
                 logging.info(f"Skipping non-HTML content ({content_type}) at {url}")
                 return
 
-            html_content = response.text
             soup = BeautifulSoup(html_content, 'html.parser')
 
             page_data = {
@@ -243,16 +323,7 @@ class TorScraperMongo:
             if meta_desc and meta_desc.get('content'):
                 page_data['meta_description'] = meta_desc['content']
 
-            links = []
-            seen_normalized = set()
-            for link in soup.find_all('a', href=True):
-                absolute_url = urljoin(url, link['href'])
-                if self.is_valid_url(absolute_url):
-                    # Normalize to avoid duplicates with different fragments
-                    normalized = self.normalize_url(absolute_url)
-                    if normalized not in seen_normalized:
-                        links.append(absolute_url)
-                        seen_normalized.add(normalized)
+            links = self.extract_onion_links(url, html_content, soup)
 
             page_data['links'] = links
             page_data['links_count'] = len(links)
@@ -382,7 +453,13 @@ def load_urls_from_file(filename):
                 if line and not line.startswith('#'):
                     # Only include .onion URLs
                     if '.onion' in line:
-                        urls.append(line)
+                        if not line.lower().startswith(('http://', 'https://')):
+                            line = f"http://{line}"
+                        parsed = urlparse(line)
+                        if parsed.netloc.endswith('.onion'):
+                            urls.append(line)
+                        else:
+                            skipped += 1
                     else:
                         skipped += 1
         logging.info(f"✓ Loaded {len(urls)} onion URLs from {filename}")
