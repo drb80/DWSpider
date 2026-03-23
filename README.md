@@ -70,6 +70,10 @@ Paginate Ahmia sources to pull deeper fresh pages:
 python3 seed_harvester.py --ahmia-max-pages 25 --ahmia-start-page 1 --from-mongo --mongo-doc-limit 50000
 ```
 
+Note: Ahmia sources are parsed using anchor links only (not raw page text)
+to avoid counting repeated embedded blobs that can make every page report the
+same host count.
+
 This updates:
 
 - `urls.txt` (deduplicated crawl seeds)
