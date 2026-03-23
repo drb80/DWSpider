@@ -43,15 +43,17 @@ class TestSeedHarvesterHelpers(unittest.TestCase):
             ],
         )
 
-    def test_expand_web_sources_only_expands_ahmia(self):
+    def test_expand_web_sources_does_not_paginate_ahmia(self):
+        # Ahmia is a flat dump — it must appear exactly once, unpaginated,
+        # even when ahmia_max_pages > 1.  Non-Ahmia sources ARE expanded.
         sources = ["https://ahmia.fi/address/", "https://example.org/list"]
         expanded = expand_web_sources(sources, ahmia_start_page=1, ahmia_max_pages=2)
         self.assertEqual(
             expanded,
             [
-                "https://ahmia.fi/address/?page=1",
-                "https://ahmia.fi/address/?page=2",
-                "https://example.org/list",
+                "https://ahmia.fi/address/",
+                "https://example.org/list?page=1",
+                "https://example.org/list?page=2",
             ],
         )
 
