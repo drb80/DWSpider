@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import time
 import random
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
 import logging
@@ -233,7 +233,7 @@ class TorScraperMongo:
                 'meta_description': None,
                 'depth': depth,
                 'status_code': response.status_code,
-                'scraped_at': datetime.now(UTC),
+                'scraped_at': datetime.now(timezone.utc),
                 'content_type': response.headers.get('Content-Type',
                                                     'unknown'),
                 'thread_name': thread_name,
@@ -467,7 +467,7 @@ if __name__ == '__main__':
         mongo_uri=MONGO_URI,
         db_name=DB_NAME,
         collection_name=COLLECTION_NAME,
-        max_depth=5,      # keep it shallow for testing
+        max_depth=100,      # keep it shallow for testing
         delay=0,            # 0–3 second delay between requests
     )
 
