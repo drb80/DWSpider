@@ -1,0 +1,4 @@
+python3 seed_harvester.py --ahmia-max-pages 25 --ahmia-start-page 1 --from-mongo --mongo-doc-limit 50000
+
+python3 seed_harvester.py --ahmia-max-pages 200 --ahmia-start-page 1 --from-mongo --mongo-doc-limit 300000 --log-level INFO
+python3 tor_scraper.py

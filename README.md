@@ -55,6 +55,39 @@ python3 tor_scraper.py
 
 Output will be written to Mongo.
 
+### 5. Expand Seed Sources
+
+Use the seed harvester to continuously refresh and deduplicate onion seeds from
+web sources, local files, and optionally your Mongo crawl history.
+
+```bash
+python3 seed_harvester.py --from-mongo --mongo-doc-limit 50000
+```
+
+Paginate Ahmia sources to pull deeper fresh pages:
+
+```bash
+python3 seed_harvester.py --ahmia-max-pages 25 --ahmia-start-page 1 --from-mongo --mongo-doc-limit 50000
+```
+
+This updates:
+
+- `urls.txt` (deduplicated crawl seeds)
+- `data/seeds/seed_catalog.json` (first/last seen metadata and source tags)
+
+Common options:
+
+```bash
+# Add extra web sources (repeat --source-url)
+python3 seed_harvester.py --source-url https://example-source.tld/onions
+
+# Add additional local files (repeat --source-file)
+python3 seed_harvester.py --source-file extra_urls.txt
+
+# Keep output separate for experimentation
+python3 seed_harvester.py --output-file urls.expanded.txt --catalog-file data/seeds/catalog.expanded.json
+```
+
 ## How It Works
 
 The scraper uses Scrapy's built-in `HttpProxyMiddleware` with PySocks to route all requests through Tor:

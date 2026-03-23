@@ -34,6 +34,8 @@ class TestExecutorShutdownSmoke(unittest.TestCase):
         scraper.delay = 0
         scraper.max_workers = 2
         scraper.verify_ssl = True
+        scraper.request_timeout = 60
+        scraper.max_retries = 0
         scraper.visited = set()
         scraper.pages_saved = 0
         scraper.pending_tasks = 0
