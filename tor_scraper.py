@@ -36,7 +36,10 @@ class TorScraperMongo:
                  max_depth=25,
                  delay=3,
                  max_workers=10,
-                 verify_ssl=True):
+                 verify_ssl=True,
+                 request_timeout=60,
+                 max_retries=2,
+                 max_pages_per_host=10):
         """
         Initialise the scraper with a MongoDB connection.
 
@@ -51,6 +54,9 @@ class TorScraperMongo:
                 permit self-signed certificates)
             request_timeout: request timeout in seconds
             max_retries: retries for timeouts / transient request failures
+            max_pages_per_host: maximum pages to save per .onion host (0 = unlimited);
+                forcing the crawler to spread across many hosts rather than crawling
+                one site thousands of pages deep
         """
         try:
             self.client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
@@ -72,9 +78,11 @@ class TorScraperMongo:
         self.max_workers = max_workers
         self.request_timeout = request_timeout
         self.max_retries = max_retries
+        self.max_pages_per_host = max_pages_per_host
 
         # simple, threaded state
         self.visited = set()
+        self.host_page_count: dict = {}  # guarded by self.lock
         self.pages_saved = 0
         self.pending_tasks = 0
         self.lock = threading.Lock()
@@ -262,6 +270,29 @@ class TorScraperMongo:
             self.visited.add(url)
             return True
 
+    def _already_in_db(self, url: str) -> bool:
+        """Return True if this URL is already stored in MongoDB.
+
+        Checking before fetching avoids wasting a Tor circuit on a page we
+        already have — particularly important when restarting a crawl run.
+        """
+        return self.collection.find_one({'url': url}, {'_id': 1}) is not None
+
+    def _claim_host_slot(self, host: str) -> bool:
+        """Reserve one page slot for *host*.
+
+        Returns False when the host has already reached max_pages_per_host and
+        the URL should be skipped.  Setting max_pages_per_host=0 disables the cap.
+        """
+        if self.max_pages_per_host <= 0:
+            return True
+        with self.lock:
+            count = self.host_page_count.get(host, 0)
+            if count >= self.max_pages_per_host:
+                return False
+            self.host_page_count[host] = count + 1
+            return True
+
     def increment_pages_saved(self):
         with self.lock:
             self.pages_saved += 1
@@ -273,6 +304,15 @@ class TorScraperMongo:
 
         if not self.mark_visited(url):
             logging.debug(f"Already visited: {url}")
+            return
+
+        if self._already_in_db(url):
+            logging.debug(f"Already in database: {url}")
+            return
+
+        host = urlparse(url).netloc
+        if not self._claim_host_slot(host):
+            logging.debug(f"Host page cap ({self.max_pages_per_host}) reached for {host}, skipping")
             return
 
         # Respect a per-request delay to avoid hammering Tor endpoints
@@ -542,8 +582,9 @@ if __name__ == '__main__':
         mongo_uri=MONGO_URI,
         db_name=DB_NAME,
         collection_name=COLLECTION_NAME,
-        max_depth=100,      # keep it shallow for testing
-        delay=0,            # 0–3 second delay between requests
+        max_depth=5,            # hops from seed; breadth comes from max_pages_per_host
+        delay=0,                # 0–3 second delay between requests
+        max_pages_per_host=10,  # cap per .onion host to force domain breadth
     )
 
     try:

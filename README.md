@@ -64,15 +64,11 @@ web sources, local files, and optionally your Mongo crawl history.
 python3 seed_harvester.py --from-mongo --mongo-doc-limit 50000
 ```
 
-Paginate Ahmia sources to pull deeper fresh pages:
-
-```bash
-python3 seed_harvester.py --ahmia-max-pages 25 --ahmia-start-page 1 --from-mongo --mongo-doc-limit 50000
-```
-
-Note: Ahmia sources are parsed using anchor links only (not raw page text)
-to avoid counting repeated embedded blobs that can make every page report the
-same host count.
+Note: Ahmia's `/address/` endpoint is a **flat host dump** — it returns all known
+onion addresses in a single response regardless of any `?page=N` parameter.
+One request per Ahmia mirror is therefore sufficient and is the default behavior.
+Ahmia sources are also parsed using anchor links only (not raw page text) to avoid
+counting repeated embedded text blobs.
 
 This updates:
 
