@@ -50,7 +50,7 @@ class HarvestStats:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def canonicalize_onion_url(value: str) -> str | None:
