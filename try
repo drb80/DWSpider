@@ -1,0 +1,11 @@
+# Round 1: harvest seeds
+python3 seed_harvester.py --from-mongo --mongo-doc-limit 100000
+
+# Round 1: crawl  (each of 18K seeds gets ≤10 pages, each page extracts links to new hosts)
+python3 tor_scraper.py   # reads urls.txt
+
+# Round 2: harvest seeds again — now includes ALL .onion links found in Round 1 pages
+#python3 seed_harvester.py --from-mongo --mongo-doc-limit 100000
+
+# Round 2: crawl with the now much larger url list...
+# python3 tor_scraper.py   # reads urls.txt

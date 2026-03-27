@@ -36,12 +36,15 @@ class TestExecutorShutdownSmoke(unittest.TestCase):
         scraper.verify_ssl = True
         scraper.request_timeout = 60
         scraper.max_retries = 0
+        scraper.max_pages_per_host = 0  # disabled — 2-URL smoke test needs no cap
         scraper.visited = set()
+        scraper.host_page_count = {}
         scraper.pages_saved = 0
         scraper.pending_tasks = 0
         scraper.lock = threading.Lock()
         scraper.collection = SimpleNamespace(
-            insert_one=lambda _: SimpleNamespace(inserted_id="fake-id")
+            insert_one=lambda _: SimpleNamespace(inserted_id="fake-id"),
+            find_one=lambda *a, **kw: None,
         )
         return scraper
 

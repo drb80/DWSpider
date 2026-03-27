@@ -50,7 +50,7 @@ class HarvestStats:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def canonicalize_onion_url(value: str) -> str | None:
@@ -135,7 +135,12 @@ def build_paginated_urls(base_url: str, start_page: int, max_pages: int) -> list
 
 
 def expand_web_sources(source_urls: Iterable[str], ahmia_start_page: int, ahmia_max_pages: int) -> list[str]:
-    """Expand Ahmia sources with page=N URLs while leaving non-Ahmia unchanged."""
+    """Expand paginated (non-Ahmia) sources with page=N URLs while leaving Ahmia as a single fetch.
+
+    Ahmia's /address/ endpoint is a flat dump that returns all known hosts on every request
+    regardless of the ?page= parameter.  Paginating it wastes bandwidth without yielding new
+    data, so Ahmia sources are always fetched exactly once.
+    """
     expanded: list[str] = []
     seen: set[str] = set()
 
@@ -144,10 +149,12 @@ def expand_web_sources(source_urls: Iterable[str], ahmia_start_page: int, ahmia_
         if not source:
             continue
 
+        # Ahmia is a flat dump; ?page=N is silently ignored server-side.
+        # Only expand non-Ahmia sources that genuinely support pagination.
         candidates = (
-            build_paginated_urls(source, ahmia_start_page, ahmia_max_pages)
+            [source]
             if is_ahmia_source(source)
-            else [source]
+            else build_paginated_urls(source, ahmia_start_page, ahmia_max_pages)
         )
 
         for candidate in candidates:
@@ -390,13 +397,16 @@ def parse_args() -> argparse.Namespace:
         "--ahmia-max-pages",
         type=int,
         default=1,
-        help="Number of paginated Ahmia pages to fetch per Ahmia source",
+        help=(
+            "Pagination depth for non-Ahmia sources that support ?page=N. "
+            "Ahmia is always fetched exactly once — it serves a flat host dump and ignores ?page=."
+        ),
     )
     parser.add_argument(
         "--ahmia-start-page",
         type=int,
         default=1,
-        help="Start page index for Ahmia pagination",
+        help="Start page index for non-Ahmia paginated sources",
     )
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return parser.parse_args()
@@ -412,7 +422,7 @@ def main() -> int:
         ahmia_start_page=max(1, args.ahmia_start_page),
         ahmia_max_pages=max(1, args.ahmia_max_pages),
     )
-    logging.info("Total web source URLs after Ahmia expansion: %d", len(source_urls))
+    logging.info("Total web source URLs: %d", len(source_urls))
     source_files = list(dict.fromkeys((args.source_files or []) + ["urls.txt", "urls.txt.bak"]))
 
     harvester = SeedHarvester(
