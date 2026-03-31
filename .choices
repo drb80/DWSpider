@@ -7,4 +7,7 @@ python3 seed_harvester.py --ahmia-max-pages 200 --ahmia-start-page 1 --from-mong
 python3 tor_scraper.py
 ----
 mongodump -d tor_scraper -c pages --out /tmp
-mongorestore -d tor_scraper -c pages /tmp/tor_scraper
+mongorestore -d tor_scraper -c pages /tmp/tor_scraper/pages.bson
+----
+git pull --no-rebase origin main
+git diff origin/main
