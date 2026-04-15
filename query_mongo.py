@@ -6,9 +6,13 @@ Helper script to query and view scraped data from MongoDB
 from pymongo import MongoClient
 from datetime import datetime
 import json
+import os
 
-def connect_db(mongo_uri='mongodb://localhost:27017/', db_name='tor_scraper', collection_name='pages'):
-    """Connect to MongoDB"""
+def connect_db(mongo_uri=None, db_name=None, collection_name=None):
+    """Connect to MongoDB using env vars or defaults."""
+    mongo_uri = mongo_uri or os.environ.get('MONGO_URI', 'mongodb://localhost:27017/')
+    db_name = db_name or os.environ.get('DB_NAME', 'tor_scraper')
+    collection_name = collection_name or os.environ.get('COLLECTION_NAME', 'pages')
     client = MongoClient(mongo_uri)
     db = client[db_name]
     collection = db[collection_name]

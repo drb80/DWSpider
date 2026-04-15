@@ -1,0 +1,14 @@
+.git
+.vscode
+__pycache__
+venv
+data
+*.bak
+*.pyc
+.gitignore
+.dockerignore
+.choices
+README.md
+README_THREADED.md
+Notes.md
+tests

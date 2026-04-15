@@ -1,0 +1,29 @@
+services:
+  tor:
+    image: leplusorg/tor
+    ports:
+      - "9050:9050"
+    environment:
+      - SOCKS_HOSTNAME=0.0.0.0
+
+  mongo:
+    image: mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./data/db:/data/db
+
+  # Scraper service
+  # Default: single scrape pass (python tor_scraper.py)
+  # Loop mode: docker compose up -d --build -e SCRAPER_MODE=loop
+  scraper:
+    build: .
+    depends_on:
+      - tor
+      - mongo
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/
+      - TOR_SOCKS=socks5h://tor:9050
+    volumes:
+      - .:/app
+    command: ["python", "tor_scraper.py"]

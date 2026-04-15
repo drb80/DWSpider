@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -381,7 +382,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument("--from-mongo", action="store_true", help="Harvest seeds from MongoDB pages collection")
-    parser.add_argument("--mongo-uri", default="mongodb://localhost:27017/")
+    parser.add_argument("--mongo-uri", default=os.environ.get("MONGO_URI", "mongodb://localhost:27017/"))
     parser.add_argument("--db-name", default="tor_scraper")
     parser.add_argument("--collection-name", default="pages")
     parser.add_argument(
