@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   tor:
     image: leplusorg/tor
@@ -14,6 +13,9 @@ services:
     volumes:
       - ./data/db:/data/db
 
+  # Scraper service
+  # Default: single scrape pass (python tor_scraper.py)
+  # Loop mode: docker compose up -d --build -e SCRAPER_MODE=loop
   scraper:
     build: .
     depends_on:

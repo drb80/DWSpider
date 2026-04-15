@@ -21,11 +21,26 @@ docker compose up -d --build
 - `-d` runs them in the background (detached) so you can close the terminal
 - `--build` rebuilds the scraper image to pick up any code changes
 
+## Automated Loop Mode
+To run the full harvest-scrape loop instead of a single pass:
+```
+docker compose up -d --build
+docker compose stop scraper
+docker compose run -d scraper python run_loop.py --rounds 0
+```
+This runs `run_loop.py` which:
+1. Scrapes the current `urls.txt` seed list
+2. Harvests new onion URLs from Ahmia + links found in MongoDB
+3. Updates `urls.txt` with the expanded seed list
+4. Scrapes again with the bigger list
+5. Repeats forever until you stop it
+
 ## Day-to-Day Commands
 
 | Command | What it does |
 |---|---|
-| `docker compose up -d` | Start everything (no rebuild needed if code hasn't changed) |
+| `docker compose up -d` | Start Tor + MongoDB + scraper (single pass) |
+| `docker compose run -d scraper python run_loop.py --rounds 0` | Run automated harvest-scrape loop instead |
 | `docker compose down` | Stop and remove all containers |
 | `docker compose ps` | Check which containers are running |
 | `docker compose restart scraper` | Restart just the scraper |
@@ -39,8 +54,19 @@ docker compose up -d --build
 | `docker compose logs --tail 100 tor` | Check Tor container logs |
 | `docker compose logs --tail 100 mongo` | Check MongoDB container logs |
 
-## Checking the Data in MongoDB
-Connect to the MongoDB container and open a shell:
+## Querying the Data
+Use `query_mongo.py` to search and explore scraped data. It has an interactive menu:
+```
+python query_mongo.py
+```
+Options include:
+1. List all scraped URLs
+2. Search by any keyword (e.g. "colorado", "drugs", "marketplace")
+3. View full HTML of a page
+4. Show database statistics
+5. Export a page to a file
+
+You can also connect directly to MongoDB via the Docker container:
 ```
 docker compose exec mongo mongosh
 ```
