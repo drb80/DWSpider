@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  tor:
+    image: leplusorg/tor
+    ports:
+      - "9050:9050"
+    environment:
+      - SOCKS_HOSTNAME=0.0.0.0
+
+  mongo:
+    image: mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./data/db:/data/db
+
+  scraper:
+    build: .
+    depends_on:
+      - tor
+      - mongo
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/
+      - TOR_SOCKS=socks5h://tor:9050
+    volumes:
+      - .:/app
+    command: ["python", "tor_scraper.py"]

@@ -16,6 +16,7 @@ from pymongo.errors import ConnectionFailure, DuplicateKeyError
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import os
 
 # Set up logging – no threading any more so we don't print thread names.
 logging.basicConfig(
@@ -39,7 +40,8 @@ class TorScraperMongo:
                  verify_ssl=True,
                  request_timeout=60,
                  max_retries=2,
-                 max_pages_per_host=10):
+                 max_pages_per_host=10,
+                 tor_socks='socks5h://127.0.0.1:9050'):
         """
         Initialise the scraper with a MongoDB connection.
 
@@ -65,8 +67,9 @@ class TorScraperMongo:
         except ConnectionFailure as e:
             logging.error(f"Failed to connect to MongoDB: {e}")
             raise
-        
+
         self.verify_ssl = verify_ssl
+        self.tor_socks = tor_socks
 
         self.db = self.client[db_name]
         self.collection = self.db[collection_name]
@@ -128,16 +131,11 @@ class TorScraperMongo:
             return self.pending_tasks
 
     def get_session(self):
-        """Return a requests session configured to use the local Tor proxy.
-
-        The returned session honours :attr:`verify_ssl`; if that flag is False
-        the session will not validate HTTPS certificates (useful for testing
-        against servers with self-signed certs).
-        """
+        """Return a requests session configured to use the Tor proxy from env or default."""
         session = requests.Session()
         session.proxies = {
-            'http': 'socks5h://127.0.0.1:9050',
-            'https': 'socks5h://127.0.0.1:9050'
+            'http': self.tor_socks,
+            'https': self.tor_socks
         }
         session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:109.0) '
@@ -513,13 +511,14 @@ def load_urls_from_file(filename):
 
 
 def test_tor_connection():
-    """Test if Tor is working."""
+    """Test if Tor is working using the TOR_SOCKS environment variable."""
     logging.info("Testing Tor connection...")
+    tor_socks = os.environ.get('TOR_SOCKS', 'socks5h://127.0.0.1:9050')
     try:
         session = requests.Session()
         session.proxies = {
-            'http': 'socks5h://127.0.0.1:9050',
-            'https': 'socks5h://127.0.0.1:9050'
+            'http': tor_socks,
+            'https': tor_socks
         }
         response = session.get('https://check.torproject.org', timeout=30)
         if 'Congratulations' in response.text:
@@ -548,34 +547,26 @@ def test_mongo_connection(mongo_uri='mongodb://localhost:27017/'):
 
 
 if __name__ == '__main__':
-    # Configuration
-    MONGO_URI = 'mongodb://localhost:27017/'
-    DB_NAME = 'tor_scraper'
-    COLLECTION_NAME = 'pages'
+    # Configuration from environment variables (for Docker Compose compatibility)
+    MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/')
+    TOR_SOCKS = os.environ.get('TOR_SOCKS', 'socks5h://127.0.0.1:9050')
+    DB_NAME = os.environ.get('DB_NAME', 'tor_scraper')
+    COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'pages')
 
     # URL source – choose one method
     URLS_FILE = 'urls.txt'  # one URL per line
     start_urls = load_urls_from_file(URLS_FILE)
-
-    # METHOD 2: manual list (uncomment and comment out METHOD 1)
-    # start_urls = [
-    #     'http://yvudsnnux372gj2nvg3bnkficwf4niel6drfqyhbtglgdsf2l75xfqqd.onion/',
-    #     'http://another-onion-site.onion/',
-    #     'http://yet-another-site.onion/',
-    # ]
 
     if not start_urls:
         logging.error("No URLs to scrape. Please check your urls.txt file or use manual list.")
         exit(1)
 
     if not test_tor_connection():
-        print("Please make sure Tor is running on port 9050")
-        print("Start it with: sudo systemctl start tor")
+        print("Please make sure Tor is running on port 9050 (or set TOR_SOCKS env variable)")
         exit(1)
 
     if not test_mongo_connection(MONGO_URI):
-        print("Please make sure MongoDB is running")
-        print("Start it with: sudo systemctl start mongod")
+        print("Please make sure MongoDB is running (or set MONGO_URI env variable)")
         exit(1)
 
     scraper = TorScraperMongo(
@@ -585,6 +576,7 @@ if __name__ == '__main__':
         max_depth=5,            # hops from seed; breadth comes from max_pages_per_host
         delay=0,                # 0–3 second delay between requests
         max_pages_per_host=10,  # cap per .onion host to force domain breadth
+        tor_socks=TOR_SOCKS,
     )
 
     try:
