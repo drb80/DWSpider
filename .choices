@@ -1,10 +1,9 @@
 docker run -it -p 27017:27017 -v ${PWD}/data/db:/data/db mongo
 ----
-python3 seed_harvester.py --ahmia-max-pages 25 --ahmia-start-page 1 --from-mongo --mongo-doc-limit 50000
-python3 tor_scraper.py
+wget "https://ahmia.fi/address/"
+wget "https://ahmia.fyi/address/"
 ----
-python3 seed_harvester.py --ahmia-max-pages 200 --ahmia-start-page 1 --from-mongo --mongo-doc-limit 300000 --log-level INFO
-python3 tor_scraper.py
+mv urls.txt urls.txt.bak && mongosh --quiet tor_scraper --eval 'db.pages.find({url: {$type: "string"}}, {_id: 0, url: 1}).forEach(d => print(d.url))' | sort -u > urls.txt
 ----
 mongodump -d tor_scraper -c pages --out /tmp
 mongorestore -d tor_scraper -c pages /tmp/tor_scraper/pages.bson
