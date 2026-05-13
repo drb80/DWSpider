@@ -208,5 +208,6 @@ marimo/_lsp/
 __marimo__/
 
 data
+finds
 urls.txt
 urls.txt.bak
