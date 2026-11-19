@@ -1,4 +1,4 @@
-# Tor Web Scraper with Scrapy
+# Tor Web Scraper
 
 A Python web scraper that routes through Tor to access .onion sites and the dark web while avoiding image downloads.
 
